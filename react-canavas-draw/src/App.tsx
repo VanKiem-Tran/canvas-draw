@@ -7,16 +7,22 @@ import View from 'ol/View.js';
 import { OSM, Vector as VectorSource } from 'ol/source.js';
 import { Tile as TileLayer, Vector as VectorLayer } from 'ol/layer.js';
 import GeoJSON from 'ol/format/GeoJSON.js';
+import { Circle } from 'ol/geom';
+import KML from 'ol/format/KML.js';
+import { Feature } from 'ol';
 
 export const socket = io('ws://localhost:1337');
 
-let draw: any; // we can remove it later
+let draw: Draw;
 
 const raster = new TileLayer({
 	source: new OSM(),
 });
 
-const source = new VectorSource({ wrapX: false });
+const source = new VectorSource({
+    url: "src/data/kmlData.kml",
+    format: new KML(),
+  })
 
 const vector = new VectorLayer({
 	source: source,
@@ -26,8 +32,9 @@ const map = new Map({
 	layers: [raster, vector],
 	target: 'map',
 	view: new View({
-		center: [-11000000, 4600000],
-		zoom: 4,
+		center: [876970.8463461736, 5859807.853963373],
+		projection: 'EPSG:3857',
+		zoom: 10,
 	}),
 });
 
@@ -51,11 +58,30 @@ const typeSelect = document.getElementById('type') as any;
 			map.addInteraction(draw);
 		}
 
+    const writeCircleGeometry = (geometry: { getCenter: () => number; getRadius: () => number }) => {
+			const geometryData = {
+				type: 'Circle',
+				center: geometry.getCenter(),
+				radius: geometry.getRadius(),
+			};
+
+      const geojson = {
+				type: 'Feature',
+				geometry: geometryData,
+				properties: null,
+			};
+
+			return JSON.stringify(geojson);
+		};
+
 		draw.on('drawend', (event: { feature: { getGeometry: () => any } }) => {
-      const geojson = new GeoJSON().writeFeature(event.feature as any);
-      // console.log(geojson)
-      const geometry = event.feature.getGeometry();
-      // console.log(geometry);
+      const drawType = event.feature.getGeometry().getType();
+
+      const geojson =
+				drawType === 'Circle'
+          ? writeCircleGeometry(event.feature.getGeometry())
+					: new GeoJSON().writeFeature(event.feature as any);
+
 			socket.emit('send-geometry', geojson);
 		});
 	}
@@ -68,24 +94,31 @@ const typeSelect = document.getElementById('type') as any;
 
 function App() {
   useEffect(() => {
-
     socket.emit('join', {name: 'WINU-0725'});
     socket.on('geometry', (data) => {
-      const feature =  new GeoJSON().readFeature(data);
-      console.log(feature);
-      source.addFeature(feature as any);
+      const featureData = JSON.parse(data);
+      const drawType = featureData.geometry.type;
+      
+      if (drawType === 'Circle') {
+        const circle = new Circle(featureData.geometry.center, featureData.geometry.radius);
+        const circleFeature = new Feature(circle);
+
+         source.addFeature(circleFeature);
+      } else {
+        const feature =  new GeoJSON().readFeature(data);
+        source.addFeature(feature as any);
+      }
     });
 
     return () => {
       socket.off('geometry', (data) => {
-				// console.log(data);
+				console.log(data);
 			});
     };
   }, []);
 
   return (
-    <>
-    </>
+    <></>
   );
 }
 
